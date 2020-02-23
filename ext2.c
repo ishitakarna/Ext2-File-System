@@ -94,35 +94,75 @@ void printInodeDirectories(int fd,  struct ext2_inode inode) {
 
 void printInodeData(int fd, struct ext2_inode inode) {
 
-	int i, j, size = 0, cur_size = 0, count = 0;
-	char block[block_size];
+	int i, j, k, size = 0, cur_size = 0, count = 0;
+	int blocks;
+	int block_entry[128];
 	char ch;
 	
 	lseek(fd, 0, SEEK_SET);
 
 	for(i=0; i<EXT2_N_BLOCKS; i++) {
-
-		if(inode.i_block[i] != 0) {
 			
-			printf("\nBlock %2u : %u\n", i, inode.i_block[i]);
-			lseek(fd, 0, SEEK_SET);
-			for(j = 0; j < block_size; j++) {
-				lseek(fd, inode.i_block[i], SEEK_CUR);
-			}
+		if (i < EXT2_NDIR_BLOCKS) { //direct 
+			//fprintf(stderr, "%d", i);
+			if(inode.i_block[i] != 0) {
+				
+				lseek(fd, 0, SEEK_SET);
+				for(j = 0; j < block_size; j++) {
+					lseek(fd, inode.i_block[i], SEEK_CUR);
+				}
 
-			printf("Size %d InodeSize %d curSize %d\n", size, inode.i_size, cur_size); 
-			while(size < inode.i_size && cur_size < block_size) {
-				count = read(fd, &ch, 1);
-				printf("%c", ch);
-				size += count;
-				cur_size += count;
-			}
+				while(size < inode.i_size && cur_size < block_size) {
+					count = read(fd, &ch, 1);
+					printf("%c", ch);
+					size += count;
+					cur_size += count;
+				}
 
-			cur_size = 0;	
+				cur_size = 0;	
+			}
 		}
+		else if (i == EXT2_IND_BLOCK) { //single indirect
+			if(inode.i_block[i] != 0) {
+				
+				lseek(fd, 0, SEEK_SET);
+				for(j = 0; j < block_size; j++) {
+					lseek(fd, inode.i_block[i], SEEK_CUR);
+				}
+		
+				blocks = (inode.i_size - size) / block_size;
+				if((inode.i_size - size) % block_size != 0) 
+					blocks = blocks + 1;
+
+
+				for(j = 0; j < blocks; j++) {
+					read(fd, &block_entry[j], 4);	
+				}
+
+				for(j = 0; j < blocks; j++) {
+					lseek(fd, 0, SEEK_SET);
+					for(k = 0; k < block_size; k++) {
+						lseek(fd, block_entry[j], SEEK_CUR);
+					}
+
+					while(size < inode.i_size && cur_size < block_size) {
+						count = read(fd, &ch, 1);
+						printf("%c", ch);
+						size += count;
+						cur_size += count;
+					}
+
+					cur_size = 0;
+				}
+
+			}
+		}
+					
+		
+			
 	}
 
-	/*for(i=0; i<EXT2_N_BLOCKS; i++)
+	/*for(i=0; i<EXT2_N_BLOCKS; i++) {
 		if (i < EXT2_NDIR_BLOCKS)                                 // direct blocks
 			printf("Block %2u : %u\n", i, inode.i_block[i]);
 		else if (i == EXT2_IND_BLOCK)                             //single indirect block
@@ -130,12 +170,13 @@ void printInodeData(int fd, struct ext2_inode inode) {
 		else if (i == EXT2_DIND_BLOCK)                            //double indirect block
 			printf("Double   : %u\n", inode.i_block[i]);
 		else if (i == EXT2_TIND_BLOCK)                            //triple indirect block
-			printf("Triple   : %u\n", inode.i_block[i]);*/
+			printf("Triple   : %u\n", inode.i_block[i]);
+	}*/
 	
 	
 }
 
-void printInfo(char* path, char* type) {
+void printInfo(char* input, char* path, char* type) {
 
 	int fd = open("/dev/sdb", O_RDONLY);
 	if(fd == -1) {
@@ -155,19 +196,11 @@ void printInfo(char* path, char* type) {
 	struct ext2_super_block sb; 
 	struct ext2_group_desc bgdesc;
 	struct ext2_inode inode;
-	struct ext2_dir_entry_2 dirent;
-
-	//Values
-	unsigned int bg_desc_count;
-	int bg_size;
-	int inodes_per_bg;
 	
 	//Repetitive 
 	long long inode_add;
 	long bg_no;
 	long inode_no;
-	long inode_in_table;
-	int count;
 	int i, flag = 0, dataFlag = 0;
 
 	//Read super block 
@@ -177,13 +210,10 @@ void printInfo(char* path, char* type) {
 
 	//Calculations based on super block
 	block_size = 1024 << sb.s_log_block_size;
-	bg_desc_count = sb.s_blocks_count / sb.s_blocks_per_group;
-	inodes_per_bg = sb.s_inodes_per_group;
-	//printf("Number of block groups : %d\n\n", bg_desc_count);
 	
 	//Read block group desc table entry (one entry = 32 bytes)
 	lseek(fd, block_size, SEEK_SET);
-	bg_size = read(fd, &bgdesc, sizeof(struct ext2_group_desc));
+	read(fd, &bgdesc, sizeof(struct ext2_group_desc));
 	//printf("BG0 Inode Table: %d\n", bgdesc.bg_inode_table); 
 	
 	//Read inode 2 ie root in inode table of BG0
@@ -217,7 +247,7 @@ void printInfo(char* path, char* type) {
 		
 		lseek(fd, block_size, SEEK_SET); //First bg descriptor 
 		lseek(fd, sizeof(struct ext2_group_desc) * bg_no, SEEK_CUR);
-		count = read(fd, &bgdesc, sizeof(struct ext2_group_desc));
+		read(fd, &bgdesc, sizeof(struct ext2_group_desc));
 		lseek(fd, 0, SEEK_SET);
 		//printf("BG%ld Inode Table: %d\n", bg_no, bgdesc.bg_inode_table); 
 		
@@ -237,6 +267,7 @@ void printInfo(char* path, char* type) {
 		}
 	}
 
+	//For root directory
 	if(flag == 0) {
 		if(strcmp(type, "inode") == 0) {
 			printf("Inode : 2\n");
@@ -255,6 +286,8 @@ void printInfo(char* path, char* type) {
 	
 
 int main(int argc, char *argv[]) {
+	
+	char input[128];
 
 	if(argc != 3) {
 		printf("Usage <./a.out> <path> <inode/data>\n");
@@ -265,8 +298,13 @@ int main(int argc, char *argv[]) {
 		printf("Usage <./a.out> <path> <inode/data>\n");
 		return 0;
 	}
+	
+	printf("Enter ext2 disk path : (ex : /dev/sdb) : \n");
+	fgets(input, 128, stdin);
+	input[strlen(input) - 1] = '\0';
+	printf("\n");
 
-	printInfo(argv[1], argv[2]);
+	printInfo(input, argv[1], argv[2]);
 	
 	return 0;
 }
