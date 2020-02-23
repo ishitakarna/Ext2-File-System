@@ -32,8 +32,7 @@ int getInodeNumber(int fd, struct ext2_inode inode, char *str) {
 	//a function which takes two arguments: directory inode and name of a file in that directory, and returns inode number of the file
 
 	struct ext2_dir_entry_2 dirent;
-	int j;
-	char *string_name;
+	int j, size = 0;
 		
 	lseek(fd, 0, SEEK_SET);
 	for(j = 0; j < block_size; j++) {
@@ -42,16 +41,59 @@ int getInodeNumber(int fd, struct ext2_inode inode, char *str) {
 
 	read(fd, &dirent, sizeof(struct ext2_dir_entry_2));
 
-	while(strncmp(dirent.name, str, dirent.name_len) != 0) {
-		printf("%s\n", dirent.name);
-		lseek(fd, dirent.rec_len - sizeof(struct ext2_dir_entry_2), SEEK_CUR);
-		read(fd, &dirent, sizeof(struct ext2_dir_entry_2));
+	while(size < inode.i_size) {
+		if(strncmp(dirent.name, str, dirent.name_len) == 0) {
+			break;
+		}
+		else {
+			size = size + dirent.rec_len;
+			lseek(fd, dirent.rec_len - sizeof(struct ext2_dir_entry_2), SEEK_CUR);
+			read(fd, &dirent, sizeof(struct ext2_dir_entry_2));
+		}
+			
 	}
-	printf("Inode no: %u Name:%s \n\n", dirent.inode, str);
+	//printf("Inode no: %u Name:%s \n\n", dirent.inode, str);
+
+	if(size >= inode.i_size)
+		return 0;
 
 	return dirent.inode;
 	
 	
+}
+
+void printInodeDirectories(int fd,  struct ext2_inode inode) {
+	
+	struct ext2_dir_entry_2 dirent;
+	int j, l, size = 0;
+	char *str;
+
+	lseek(fd, 0, SEEK_SET);
+	for(j = 0; j < block_size; j++) {
+		lseek(fd, inode.i_block[0], SEEK_CUR);
+	}
+
+	read(fd, &dirent, sizeof(struct ext2_dir_entry_2));
+
+	while(size < inode.i_size) {
+		l = dirent.name_len;
+		str = (char*)malloc(sizeof(char) * l);
+		for(j = 0; j < l; j++) {
+			str[j] = dirent.name[j];
+		}
+		
+		printf("%s\n", str);
+		size = size + dirent.rec_len;
+		lseek(fd, dirent.rec_len - sizeof(struct ext2_dir_entry_2), SEEK_CUR);
+		read(fd, &dirent, sizeof(struct ext2_dir_entry_2));
+
+		free(str);
+	}
+		
+}
+
+void printInodeData(int fd, struct ext2_inode inode) {
+	printf("entered");
 }
 
 void printInfo(char* path, char* type) {
@@ -61,6 +103,11 @@ void printInfo(char* path, char* type) {
 		perror("Error:");
 		exit(errno);
 	}
+
+	char *path_cpy;
+	int l = strlen(path);
+	path_cpy = (char*)malloc(sizeof(char) * l);
+	strcpy(path_cpy, path);
 
 	//Traversing path 
 	char *str;
@@ -75,7 +122,6 @@ void printInfo(char* path, char* type) {
 	unsigned int bg_desc_count;
 	int bg_size;
 	int inodes_per_bg;
-	int i;
 	
 	//Repetitive 
 	long long inode_add;
@@ -83,22 +129,23 @@ void printInfo(char* path, char* type) {
 	long inode_no;
 	long inode_in_table;
 	int count;
+	int i, flag = 0, dirFlag = 0, regFlag = 0;
 
 	//Read super block 
 	lseek(fd, 1024, SEEK_CUR);
 	read(fd, &sb, sizeof(struct ext2_super_block));
-	printSuperBlock(sb);
+	//printSuperBlock(sb);
 
 	//Calculations based on super block
 	block_size = 1024 << sb.s_log_block_size;
 	bg_desc_count = sb.s_blocks_count / sb.s_blocks_per_group;
 	inodes_per_bg = sb.s_inodes_per_group;
-	printf("Number of block groups : %d\n\n", bg_desc_count);
+	//printf("Number of block groups : %d\n\n", bg_desc_count);
 	
 	//Read block group desc table entry (one entry = 32 bytes)
 	lseek(fd, block_size, SEEK_SET);
 	bg_size = read(fd, &bgdesc, sizeof(struct ext2_group_desc));
-	printf("BG0 Inode Table: %d\n", bgdesc.bg_inode_table); 
+	//printf("BG0 Inode Table: %d\n", bgdesc.bg_inode_table); 
 	
 	//Read inode 2 ie root in inode table of BG0
 	inode_add = bgdesc.bg_inode_table * block_size + 2*sizeof(struct ext2_inode);
@@ -107,8 +154,32 @@ void printInfo(char* path, char* type) {
 
 	str = strtok(path, "/");
 	while(str != NULL) {
-		
+		flag = 1;
+
 		inode_no = getInodeNumber(fd,inode,str); //Read directory entries and get inode number 
+		str = strtok(NULL, "/");
+		if(str == NULL) {
+			if(inode_no == 0) {
+				printf("%s : File not found by ext2_lookup\n", path_cpy);
+				break;
+			}
+			else {
+				if(strcmp(type, "inode") == 0) {
+					printf("Inode : %ld\n", inode_no);
+					break;
+				}
+				else {
+					if ((inode.i_mode & S_IFMT) == S_IFDIR) {
+						//dirFlag = 1;
+						printf("directory\n");		
+					}
+					else {
+						//regFlag = 1;
+						printf("file\n");
+					}
+				}
+			}
+		}
 			
 		bg_no = (inode_no + 1) / sb.s_inodes_per_group;
 		
@@ -116,18 +187,36 @@ void printInfo(char* path, char* type) {
 		lseek(fd, sizeof(struct ext2_group_desc) * bg_no, SEEK_CUR);
 		count = read(fd, &bgdesc, sizeof(struct ext2_group_desc));
 		lseek(fd, 0, SEEK_SET);
-		printf("BG%ld Inode Table: %d\n", bg_no, bgdesc.bg_inode_table); 
+		//printf("BG%ld Inode Table: %d\n", bg_no, bgdesc.bg_inode_table); 
 		
 		for(i = 0; i < block_size; i++) {
 			lseek(fd, bgdesc.bg_inode_table, SEEK_CUR);
 		}
 		lseek(fd, (inode_no - bg_no * sb.s_inodes_per_group - 1) * sb.s_inode_size, SEEK_CUR);		
 		read(fd, &inode, sizeof(struct ext2_inode));
-		printInode(inode);
+		
+		if(dirFlag == 1) {
+			printInodeDirectories(fd, inode);
+		}
 
-		str = strtok(NULL, "/");
+		else if(regFlag == 1) {
+			printInodeData(fd, inode);
+		}
+	}
+
+	if(flag == 0) {
+		if(strcmp(type, "inode") == 0) {
+			printf("Inode : 2\n");
+		}
+		else {
+			if ((inode.i_mode & S_IFMT) == S_IFDIR) {
+				printInodeDirectories(fd, inode);		
+			}
+		}
+			
 	}
 	
+	free(path_cpy);
 	close(fd);
 }
 	
