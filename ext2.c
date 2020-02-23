@@ -93,7 +93,46 @@ void printInodeDirectories(int fd,  struct ext2_inode inode) {
 }
 
 void printInodeData(int fd, struct ext2_inode inode) {
-	printf("entered");
+
+	int i, j, size = 0, cur_size = 0, count = 0;
+	char block[block_size];
+	char ch;
+	
+	lseek(fd, 0, SEEK_SET);
+
+	for(i=0; i<EXT2_N_BLOCKS; i++) {
+
+		if(inode.i_block[i] != 0) {
+			
+			printf("\nBlock %2u : %u\n", i, inode.i_block[i]);
+			lseek(fd, 0, SEEK_SET);
+			for(j = 0; j < block_size; j++) {
+				lseek(fd, inode.i_block[i], SEEK_CUR);
+			}
+
+			printf("Size %d InodeSize %d curSize %d\n", size, inode.i_size, cur_size); 
+			while(size < inode.i_size && cur_size < block_size) {
+				count = read(fd, &ch, 1);
+				printf("%c", ch);
+				size += count;
+				cur_size += count;
+			}
+
+			cur_size = 0;	
+		}
+	}
+
+	/*for(i=0; i<EXT2_N_BLOCKS; i++)
+		if (i < EXT2_NDIR_BLOCKS)                                 // direct blocks
+			printf("Block %2u : %u\n", i, inode.i_block[i]);
+		else if (i == EXT2_IND_BLOCK)                             //single indirect block
+			printf("Single   : %u\n", inode.i_block[i]);
+		else if (i == EXT2_DIND_BLOCK)                            //double indirect block
+			printf("Double   : %u\n", inode.i_block[i]);
+		else if (i == EXT2_TIND_BLOCK)                            //triple indirect block
+			printf("Triple   : %u\n", inode.i_block[i]);*/
+	
+	
 }
 
 void printInfo(char* path, char* type) {
@@ -129,7 +168,7 @@ void printInfo(char* path, char* type) {
 	long inode_no;
 	long inode_in_table;
 	int count;
-	int i, flag = 0, dirFlag = 0, regFlag = 0;
+	int i, flag = 0, dataFlag = 0;
 
 	//Read super block 
 	lseek(fd, 1024, SEEK_CUR);
@@ -169,14 +208,7 @@ void printInfo(char* path, char* type) {
 					break;
 				}
 				else {
-					if ((inode.i_mode & S_IFMT) == S_IFDIR) {
-						//dirFlag = 1;
-						printf("directory\n");		
-					}
-					else {
-						//regFlag = 1;
-						printf("file\n");
-					}
+					dataFlag = 1;
 				}
 			}
 		}
@@ -195,12 +227,13 @@ void printInfo(char* path, char* type) {
 		lseek(fd, (inode_no - bg_no * sb.s_inodes_per_group - 1) * sb.s_inode_size, SEEK_CUR);		
 		read(fd, &inode, sizeof(struct ext2_inode));
 		
-		if(dirFlag == 1) {
-			printInodeDirectories(fd, inode);
-		}
-
-		else if(regFlag == 1) {
-			printInodeData(fd, inode);
+		if(dataFlag == 1) {
+			if ((inode.i_mode & S_IFMT) == S_IFDIR) {
+				printInodeDirectories(fd, inode);		
+			}
+			else {
+				printInodeData(fd, inode);
+			}
 		}
 	}
 
